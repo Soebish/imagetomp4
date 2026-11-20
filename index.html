@@ -150,6 +150,33 @@ let videoSize = { w: 1280, h: 720 };
 // Cek apakah library Zappar tersedia (untuk fallback MP4)
 const hasZappar = typeof ZapparMediaRecorder !== 'undefined';
 
+// ===== Filter ekstensi gambar yang didukung =====
+const IMAGE_EXTENSIONS = new Set([
+  'jpg', 'jpeg', 'jpe', 'jfif',
+  'png', 'apng',
+  'webp',
+  'gif',
+  'bmp', 'dib',
+  'tif', 'tiff',
+  'svg', 'svgz',
+  'ico', 'cur',
+  'avif',
+  'heic', 'heif'
+]);
+
+function isImageFile(file) {
+  // Cek ekstensi nama file (case-insensitive)
+  const name = (file.name || '').toLowerCase();
+  const dot = name.lastIndexOf('.');
+  if (dot !== -1) {
+    const ext = name.slice(dot + 1);
+    if (IMAGE_EXTENSIONS.has(ext)) return true;
+  }
+  // Fallback: cek MIME type jika file tidak punya ekstensi
+  return !!(file.type && file.type.startsWith('image/'));
+}
+// =================================================
+
 fileInput.addEventListener('change', async (e) => {
   images = [];
   preview.innerHTML = '';
@@ -157,20 +184,42 @@ fileInput.addEventListener('change', async (e) => {
   downloadLink.style.display = 'none';
   progressWrap.classList.remove('active');
   progressBar.style.width = '0%';
+  buildBtn.disabled = true;
 
-  const files = Array.from(e.target.files);
-  if (files.length === 0) {
-    buildBtn.disabled = true;
+  const allFiles = Array.from(e.target.files);
+  if (allFiles.length === 0) {
     statusEl.textContent = 'Pilih gambar dulu.';
     return;
   }
+
+  // Filter hanya file gambar berdasarkan ekstensi / MIME
+  const imageFiles = allFiles.filter(isImageFile);
+  const skipped = allFiles.length - imageFiles.length;
+
+  if (imageFiles.length === 0) {
+    statusEl.textContent = '❌ Tidak ada file gambar yang valid. Hanya file gambar (jpg, png, webp, gif, dll) yang diproses.';
+    return;
+  }
+
   statusEl.textContent = 'Memuat gambar...';
-  for (const file of files) {
-    const img = await loadImage(file);
-    images.push({ img });
-    const thumb = document.createElement('img');
-    thumb.src = img.src;
-    preview.appendChild(thumb);
+
+  let failed = 0;
+  for (const file of imageFiles) {
+    try {
+      const img = await loadImage(file);
+      images.push({ img });
+      const thumb = document.createElement('img');
+      thumb.src = img.src;
+      preview.appendChild(thumb);
+    } catch (err) {
+      failed++;
+      console.warn('Gagal memuat gambar:', file.name, err);
+    }
+  }
+
+  if (images.length === 0) {
+    statusEl.textContent = '❌ Semua file gambar gagal dimuat.';
+    return;
   }
 
   const first = images[0].img;
@@ -181,8 +230,13 @@ fileInput.addEventListener('change', async (e) => {
   videoSize = { w, h };
 
   infoEl.textContent = `Resolusi video: ${videoSize.w} × ${videoSize.h} (mengikuti gambar pertama)`;
+
+  let msg = `${images.length} gambar siap.`;
+  if (skipped > 0) msg += ` (${skipped} file non-gambar dilewati)`;
+  if (failed > 0) msg += ` (${failed} gambar gagal dimuat)`;
+  statusEl.textContent = msg;
+
   buildBtn.disabled = false;
-  statusEl.textContent = `${images.length} gambar siap.`;
 });
 
 function loadImage(file) {
@@ -191,10 +245,10 @@ function loadImage(file) {
     reader.onload = () => {
       const img = new Image();
       img.onload = () => resolve(img);
-      img.onerror = reject;
+      img.onerror = () => reject(new Error('Image decode failed'));
       img.src = reader.result;
     };
-    reader.onerror = reject;
+    reader.onerror = () => reject(new Error('File read failed'));
     reader.readAsDataURL(file);
   });
 }
