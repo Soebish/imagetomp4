@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Image to MP4</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #111827;
+    color: #e5e7eb;
+    margin: 0;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 { font-size: 1.25rem; margin: 4px 0 16px; }
+  .card {
+    background: #1f2937;
+    border-radius: 10px;
+    padding: 14px;
+    width: 100%;
+    max-width: 460px;
+    margin-bottom: 12px;
+  }
+  label { display: block; font-size: 0.8rem; margin-bottom: 6px; color: #9ca3af; }
+  input[type="file"], select {
+    width: 100%;
+    padding: 9px;
+    border-radius: 8px;
+    border: 1px solid #374151;
+    background: #111827;
+    color: #e5e7eb;
+    font-size: 0.95rem;
+  }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
+  #preview { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  #preview img { width: 60px; height: 60px; object-fit: cover; border-radius: 6px; border: 1px solid #374151; }
+  #info { font-size: 0.78rem; color: #9ca3af; margin-top: 8px; }
+  button {
+    width: 100%;
+    padding: 13px;
+    border: none;
+    border-radius: 9px;
+    background: #3b82f6;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 6px;
+  }
+  button:disabled { background: #4b5563; cursor: not-allowed; }
+  #status { font-size: 0.85rem; text-align: center; margin-top: 8px; color: #9ca3af; min-height: 1.2em; }
+  .progress-wrap {
+    width: 100%;
+    height: 8px;
+    background: #374151;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 10px;
+    display: none;
+  }
+  .progress-wrap.active { display: block; }
+  #progressBar {
+    height: 100%;
+    width: 0%;
+    background: #3b82f6;
+    transition: width 0.1s linear;
+  }
+  a.download {
+    display: none; text-align: center; margin-top: 12px;
+    padding: 12px; background: #22c55e; color: #fff;
+    border-radius: 9px; text-decoration: none; font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<h1>🎬 Image to MP4</h1>
+
+<div class="card">
+  <label>Pilih gambar (urut sesuai pilihan)</label>
+  <input type="file" id="fileInput" accept="image/*" multiple>
+  <div id="preview"></div>
+  <div id="info"></div>
+</div>
+
+<div class="card">
+  <div class="row">
+    <div>
+      <label>Durasi per gambar</label>
+      <select id="duration">
+        <option value="5" selected>5 detik</option>
+        <option value="6">6 detik</option>
+        <option value="7">7 detik</option>
+        <option value="8">8 detik</option>
+        <option value="9">9 detik</option>
+        <option value="10">10 detik</option>
+      </select>
+    </div>
+    <div>
+      <label>FPS</label>
+      <select id="fps">
+        <option value="25" selected>25</option>
+        <option value="30">30</option>
+        <option value="60">60</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <label>Bitrate video</label>
+  <select id="bitrate">
+    <option value="1000000" selected>1000 kbps (1 Mbps)</option>
+    <option value="2500000">2500 kbps (2.5 Mbps)</option>
+    <option value="5000000">5000 kbps (5 Mbps)</option>
+    <option value="8000000">8000 kbps (8 Mbps)</option>
+  </select>
+</div>
+
+<button id="buildBtn" disabled>Buat Video MP4</button>
+
+<div class="progress-wrap" id="progressWrap">
+  <div id="progressBar"></div>
+</div>
+<div id="status">Pilih gambar dulu.</div>
+
+<a id="downloadLink" class="download" download="video.mp4">⬇️ Simpan Video MP4</a>
+
+<!-- Library untuk konversi WebM -> MP4 jika browser tidak mendukung native -->
+<script src="https://cdn.jsdelivr.net/npm/@zappar/mediarecorder@1.2.0-beta.0/dist/mediarecorder.umd.js"></script>
+
+<script>
+const fileInput = document.getElementById('fileInput');
+const preview = document.getElementById('preview');
+const infoEl = document.getElementById('info');
+const buildBtn = document.getElementById('buildBtn');
+const statusEl = document.getElementById('status');
+const progressWrap = document.getElementById('progressWrap');
+const progressBar = document.getElementById('progressBar');
+const downloadLink = document.getElementById('downloadLink');
+
+let images = [];
+let videoSize = { w: 1280, h: 720 };
+
+// Cek apakah library Zappar tersedia (untuk fallback MP4)
+const hasZappar = typeof ZapparMediaRecorder !== 'undefined';
+
+fileInput.addEventListener('change', async (e) => {
+  images = [];
+  preview.innerHTML = '';
+  infoEl.textContent = '';
+  downloadLink.style.display = 'none';
+  progressWrap.classList.remove('active');
+  progressBar.style.width = '0%';
+
+  const files = Array.from(e.target.files);
+  if (files.length === 0) {
+    buildBtn.disabled = true;
+    statusEl.textContent = 'Pilih gambar dulu.';
+    return;
+  }
+  statusEl.textContent = 'Memuat gambar...';
+  for (const file of files) {
+    const img = await loadImage(file);
+    images.push({ img });
+    const thumb = document.createElement('img');
+    thumb.src = img.src;
+    preview.appendChild(thumb);
+  }
+
+  const first = images[0].img;
+  let w = first.naturalWidth || first.width;
+  let h = first.naturalHeight || first.height;
+  if (w % 2 !== 0) w -= 1;
+  if (h % 2 !== 0) h -= 1;
+  videoSize = { w, h };
+
+  infoEl.textContent = `Resolusi video: ${videoSize.w} × ${videoSize.h} (mengikuti gambar pertama)`;
+  buildBtn.disabled = false;
+  statusEl.textContent = `${images.length} gambar siap.`;
+});
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function drawCover(ctx, img, cw, ch) {
+  const scale = Math.max(cw / img.width, ch / img.height);
+  const dw = img.width * scale;
+  const dh = img.height * scale;
+  ctx.drawImage(img, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+}
+
+buildBtn.addEventListener('click', async () => {
+  if (images.length === 0) return;
+
+  buildBtn.disabled = true;
+  downloadLink.style.display = 'none';
+  progressBar.style.width = '0%';
+  progressWrap.classList.add('active');
+  statusEl.textContent = 'Menyiapkan encoder...';
+
+  const durationPerImage = parseInt(document.getElementById('duration').value, 10);
+  const fps = parseInt(document.getElementById('fps').value, 10);
+  const bitrate = parseInt(document.getElementById('bitrate').value, 10);
+  const cw = videoSize.w;
+  const ch = videoSize.h;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = cw;
+  canvas.height = ch;
+  const ctx = canvas.getContext('2d');
+
+  // Tentukan MIME type: prioritaskan MP4 native, fallback ke Zappar (WebM->MP4)
+  let mimeType = '';
+  const mp4Candidates = [
+    'video/mp4;codecs=avc1.42E01E',
+    'video/mp4;codecs=avc1',
+    'video/mp4'
+  ];
+  
+  for (const c of mp4Candidates) {
+    if (MediaRecorder.isTypeSupported(c)) {
+      mimeType = c;
+      break;
+    }
+  }
+
+  // Jika tidak ada MP4 native, gunakan Zappar library (otomatis konversi ke MP4)
+  let useZappar = false;
+  if (!mimeType && hasZappar && ZapparMediaRecorder.MediaRecorder.isTypeSupported('video/mp4')) {
+    useZappar = true;
+    mimeType = 'video/mp4';
+  }
+
+  if (!mimeType) {
+    // Terakhir, coba WebM (tapi beri peringatan)
+    if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
+      mimeType = 'video/webm;codecs=vp9';
+    } else if (MediaRecorder.isTypeSupported('video/webm')) {
+      mimeType = 'video/webm';
+    } else {
+      statusEl.textContent = '❌ Browser tidak mendukung perekaman video.';
+      buildBtn.disabled = false;
+      return;
+    }
+  }
+
+  const isMp4Native = mimeType.includes('mp4') && !useZappar;
+
+  // Buat recorder
+  let recorder;
+  const stream = canvas.captureStream(fps);
+  
+  if (useZappar) {
+    // Gunakan Zappar MediaRecorder (menghasilkan MP4)
+    if (ZapparMediaRecorder.load) {
+      await ZapparMediaRecorder.load();
+    }
+    recorder = new ZapparMediaRecorder.MediaRecorder(stream, { 
+      mimeType: 'video/mp4',
+      videoBitsPerSecond: bitrate 
+    });
+  } else {
+    recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: bitrate });
+  }
+
+  const chunks = [];
+  recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+  const done = new Promise((resolve) => {
+    recorder.onstop = () => {
+      const blobType = (isMp4Native || useZappar) ? 'video/mp4' : 'video/webm';
+      resolve(new Blob(chunks, { type: blobType }));
+    };
+  });
+
+  recorder.start();
+
+  const framesPerImage = durationPerImage * fps;
+  const totalFrames = framesPerImage * images.length;
+  const frameDelay = 1000 / fps;
+
+  let frame = 0;
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i].img;
+    for (let f = 0; f < framesPerImage; f++) {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, cw, ch);
+      drawCover(ctx, img, cw, ch);
+
+      frame++;
+      const pct = (frame / totalFrames) * 100;
+      progressBar.style.width = pct.toFixed(1) + '%';
+      statusEl.textContent = `Merender ${Math.round(pct)}% (${frame}/${totalFrames} frame)`;
+      await new Promise(r => setTimeout(r, frameDelay));
+    }
+  }
+
+  statusEl.textContent = useZappar ? 'Menggenerate ke MP4...' : 'Menyelesaikan video...';
+  recorder.stop();
+  const blob = await done;
+
+  // Pastikan blob bertipe MP4 jika menggunakan Zappar atau native
+  const finalBlob = (isMp4Native || useZappar) 
+    ? new Blob([blob], { type: 'video/mp4' }) 
+    : blob;
+
+  const url = URL.createObjectURL(finalBlob);
+  
+  // Langsung tampilkan tombol download (tanpa preview video)
+  const ext = (isMp4Native || useZappar) ? 'mp4' : 'webm';
+  downloadLink.href = url;
+  downloadLink.download = `video.${ext}`;
+  downloadLink.textContent = `⬇️ Simpan Video ${ext.toUpperCase()}`;
+  downloadLink.style.display = 'block';
+
+  progressBar.style.width = '100%';
+  
+  if (isMp4Native || useZappar) {
+    statusEl.textContent = '✅ Selesai! Video MP4 siap disimpan.';
+  } else {
+    statusEl.textContent = '⚠️ Browser tidak mendukung MP4. Video tersimpan sebagai WebM. Gunakan Chrome/Edge terbaru untuk MP4.';
+  }
+
+  buildBtn.disabled = false;
+});
+</script>
+</body>
+</html>
